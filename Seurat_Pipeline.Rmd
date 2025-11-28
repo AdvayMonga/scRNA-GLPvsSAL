@@ -1,0 +1,589 @@
+---
+title: "Seurat_Pipeline"
+author: "Advay Monga"
+date: "2024-07-01"
+output: html_document
+---
+
+```{r}
+## Load paackages
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(hdf5r)
+library(Matrix)
+library(scCustomize)
+library(DESeq2)
+library(dplyr)
+library(openxlsx)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+library(enrichplot)
+library(tidyr)
+library(viridis)
+library(reshape2)
+
+```
+
+```{r}
+# Read data
+Read10X_h5('/Users/25advaym/genomics/GLPvsSAL/Ctrl1/Ctrl1.h5') -> Ctrl1.data
+Read10X_h5('/Users/25advaym/genomics/GLPvsSAL/Ctrl2/Ctrl2.h5') -> Ctrl2.data
+Read10X_h5('/Users/25advaym/genomics/GLPvsSAL/Obese1/Obese1.h5') -> Obese1.data
+Read10X_h5('/Users/25advaym/genomics/GLPvsSAL/Obese2/Obese2.h5') -> Obese2.data
+
+# Create the Seurat Objects
+Ctrl1 <- CreateSeuratObject(counts=Ctrl1.data, project = "Ctrl1")
+Ctrl2 <- CreateSeuratObject(counts=Ctrl2.data, project = "Ctrl2")
+Obese1 <- CreateSeuratObject(counts=Obese1.data, project = "Obese1")
+Obese2 <- CreateSeuratObject(counts=Obese2.data, project = "Obese2")
+
+# Normalize Data
+normData <- function(sobj, nfs){
+  sobj <- NormalizeData(sobj, normalization.method = "LogNormalize", scale.factor = 10000)
+  sobj <- FindVariableFeatures(sobj, selection.method = "vst", nfeatures = nfs)
+  return(sobj)
+}
+
+Ctrl1 <- normData(Ctrl1, 33696)
+Ctrl2 <- normData(Ctrl2, 33696)
+Obese1 <- normData(Obese1, 33696)
+Obese2 <- normData(Obese2, 33696)
+
+# Scale data
+sclData <- function(sobj){
+  all.genes <- rownames(sobj)
+  sobj <- ScaleData(sobj, features = all.genes)
+  return(sobj)
+}
+
+Ctrl1 <- sclData(Ctrl1)
+Ctrl2 <- sclData(Ctrl2)
+Obese1 <- sclData(Obese1)
+Obese2 <- sclData(Obese2)
+
+```
+
+```{r}
+# PCA
+doPca <- function(srtObj){
+  srtObj <- RunPCA(srtObj, features = VariableFeatures(object = srtObj))
+  #print(srtObj[["pca"]], dims = 1:5, nfeatures = 5)
+  #VizDimLoadings(srtObj, dims = 1:2, reduction = "pca")
+  #DimPlot(srtObj, reduction = "pca") + NoLegend()
+  #DimHeatmap(srtObj, dims = 1:15, cells = 500, balanced = TRUE)
+  return(srtObj)
+}
+
+Ctrl1 <- doPca(Ctrl1)
+Ctrl2 <- doPca(Ctrl2)
+Obese1 <- doPca(Obese1)
+Obese2 <- doPca(Obese2)
+
+## Make UMAP
+makeUMAP <- function(sobj){
+  # Cluster cells
+  sobj <- FindNeighbors(sobj, dims = 1:10)
+  sobj <- FindClusters(sobj, resolution = 0.5)
+
+  # Look at cluster IDs of the first 5 cells
+  print(head(Idents(sobj), 5))
+
+  # Display and return
+  sobj <- RunUMAP(sobj, dims = 1:10)
+  umap_plot <- DimPlot(sobj, reduction = "umap", label = TRUE)
+  print(umap_plot)
+  return(sobj)
+}
+
+Ctrl1 <- makeUMAP(Ctrl1)
+Ctrl2 <- makeUMAP(Ctrl2)
+Obese1 <- makeUMAP(Obese1)
+Obese2 <- makeUMAP(Obese2)
+```
+
+```{r}
+# Feature Plot
+
+# Feature Lists for each object
+# Epithelial and Neutrophils for all, Eosinophils as well for Obese2
+
+featuresEpi = c("Scgb3a1", "Muc5b", "Krt8", "Reg3g", "Scgb3a2")
+featuresNeu = c("S100a8", "S100a9", "Ly6g", "Csf3r", "Retnlg")
+featuresEos = c("Siglecf", "Rnase2a", "Alox5", "Ccr3", "Epx", "Car4", "Cd63", "Ear1")
+
+
+
+# Making feature plot function
+makeFP <- function(sobj, featList){
+  fp <- FeaturePlot(sobj, features = featList)
+  return(fp)
+}
+
+# Generate and display the feature plots
+Ctrl1_fp1 <- makeFP(Ctrl1, featuresEpi)
+Ctrl1_fp2 <- makeFP(Ctrl1, featuresNeu)
+
+Ctrl2_fp1 <- makeFP(Ctrl2, featuresEpi)
+Ctrl2_fp2 <- makeFP(Ctrl2, featuresNeu)
+
+Obese1_fp1 <- makeFP(Obese1, featuresEpi)
+Obese1_fp2 <- makeFP(Obese1, featuresNeu)
+Obese1_fp3 <- makeFP(Obese1, featuresEos)
+
+Obese2_fp1 <- makeFP(Obese2, featuresEpi)
+Obese2_fp2 <- makeFP(Obese2, featuresNeu)
+Obese2_fp3 <- makeFP(Obese2, featuresEos)
+
+# Print the plots
+print(Ctrl1_fp1)
+print(Ctrl1_fp2)
+
+print(Ctrl2_fp1)
+print(Ctrl2_fp2)
+
+print(Obese1_fp1)
+print(Obese1_fp2)
+print(Obese1_fp3)
+
+print(Obese2_fp1)
+print(Obese2_fp2)
+print(Obese2_fp3)
+```
+
+```{r}
+
+# Neutrophils
+Ctrl1_Neu <- subset(Ctrl1, ident = c("7"))
+Ctrl2_Neu <- subset(Ctrl2, ident = c("10"))
+Obese1_Neu <- subset(Obese1, ident = c("9"))
+Obese2_Neu <- subset(Obese2, ident = c("9"))
+
+Ctrl1_Neu$sample <- sample(c("Ctrl1_Neu"), size=ncol(Ctrl1_Neu), replace=TRUE)
+Ctrl2_Neu$sample <- sample(c("Ctrl2_Neu"), size=ncol(Ctrl2_Neu), replace=TRUE)
+Obese1_Neu$sample <- sample(c("Obese1_Neu"), size=ncol(Obese1_Neu), replace=TRUE)
+Obese2_Neu$sample <- sample(c("Obese2_Neu"), size=ncol(Obese2_Neu), replace=TRUE)
+
+MergedNeu <- merge(Ctrl1_Neu, y= c(Ctrl2_Neu,Obese1_Neu,Obese2_Neu))
+MergedNeu <- JoinLayers(MergedNeu)
+
+MergedNeu <- FindVariableFeatures(MergedNeu, selection.method = "vst", nfeatures = 33696)
+
+MergedNeu<- ScaleData(MergedNeu, verbose = FALSE)
+MergedNeu<- RunPCA(MergedNeu, npcs = 30, verbose = TRUE)
+MergedNeu<- RunUMAP(MergedNeu, reduction = "pca", dims = 1:10)
+MergedNeu<- FindNeighbors(MergedNeu, reduction = "pca", dims = 1:10)
+MergedNeu<- FindClusters(MergedNeu, resolution = 0.5)
+DimPlot(MergedNeu, reduction = "umap", label = TRUE, repel = TRUE)
+
+DimPlot(MergedNeu, reduction = "umap", label = TRUE, repel = TRUE, group.by = "sample")
+
+DEGNeu <- FindAllMarkers(MergedNeu, test.use = "roc",min.pct = 0.1, logfc.threshold = 0.25)
+```
+
+```{r}
+
+# Epithelial 
+Ctrl1_Epi <- subset(Ctrl1, ident = c("8"), subset = Krt8>0.25 | Scgb3a1>0.25 | Muc5b>0.25 | Reg3g>0.25 | Scgb3a2>0.25)
+DimPlot(Ctrl1_Epi, reduction = "umap", label = TRUE, repel = TRUE)
+
+Ctrl2_Epi <- subset(Ctrl2, ident = c("9"), subset = Krt8>0.25 | Scgb3a1>0.25 | Muc5b>0.25 | Reg3g>0.25 | Scgb3a2>0.25)
+DimPlot(Ctrl2_Epi, reduction = "umap", label = TRUE, repel = TRUE)
+
+Obese1_Epi <- subset(Obese1, ident = c("10"), subset = Krt8>0.1 | Scgb3a1>0.1 | Muc5b>0.1 | Reg3g>0.1 | Scgb3a2>0.1)
+DimPlot(Obese1_Epi, reduction = "umap", label = TRUE, repel = TRUE)
+
+Obese2_Epi <- subset(Obese2, ident = c("8"), subset = Krt8>0.25 | Scgb3a1>0.25 | Muc5b>0.25 | Reg3g>0.25 | Scgb3a2>0.25)
+DimPlot(Obese2_Epi, reduction = "umap", label = TRUE, repel = TRUE)
+
+Ctrl1_Epi$sample <- sample(c("Ctrl1_Epi"), size=ncol(Ctrl1_Epi), replace=TRUE)
+Ctrl2_Epi$sample <- sample(c("Ctrl2_Epi"), size=ncol(Ctrl2_Epi), replace=TRUE)
+Obese1_Epi$sample <- sample(c("Obese1_Epi"), size=ncol(Obese1_Epi), replace=TRUE)
+Obese2_Epi$sample <- sample(c("Obese2_Epi"), size=ncol(Obese2_Epi), replace=TRUE)
+
+MergedEpi <- merge(Ctrl1_Epi, y= c(Ctrl2_Epi,Obese1_Epi,Obese2_Epi))
+MergedEpi <- JoinLayers(MergedEpi)
+
+MergedEpi <- FindVariableFeatures(MergedEpi, selection.method = "vst", nfeatures = 33696)
+
+MergedEpi<- ScaleData(MergedEpi, verbose = FALSE)
+MergedEpi<- RunPCA(MergedEpi, npcs = 30, verbose = TRUE)
+MergedEpi<- RunUMAP(MergedEpi, reduction = "pca", dims = 1:10)
+MergedEpi<- FindNeighbors(MergedEpi, reduction = "pca", dims = 1:10)
+MergedEpi<- FindClusters(MergedEpi, resolution = 0.5)
+DimPlot(MergedEpi, reduction = "umap", label = TRUE, repel = TRUE)
+
+DimPlot(MergedEpi, reduction = "umap", label = TRUE, repel = TRUE, group.by = "sample")
+
+DEGEpi <- FindAllMarkers(MergedEpi, test.use = "roc",min.pct = 0.1, logfc.threshold = 0.25)
+
+```
+
+
+
+```{r}
+
+# Eosinophils
+Obese1_Eos <- subset(Obese1, ident = c("12"))
+Obese2_Eos <- subset(Obese2, ident = c("12"))
+
+
+Obese1_Eos$sample <- sample(c("Obese1_Eos"), size=ncol(Obese1_Eos), replace=TRUE)
+Obese2_Eos$sample <- sample(c("Obese2_Eos"), size=ncol(Obese2_Eos), replace=TRUE)
+
+MergedEos <- merge(Obese1_Eos, y= Obese2_Eos)
+MergedEos <- JoinLayers(MergedEos)
+
+MergedEos <- FindVariableFeatures(MergedEos, selection.method = "vst", nfeatures = 33696)
+
+MergedEos<- ScaleData(MergedEos, verbose = FALSE)
+MergedEos<- RunPCA(MergedEos, npcs = 30, verbose = TRUE)
+MergedEos<- RunUMAP(MergedEos, reduction = "pca", dims = 1:10)
+MergedEos<- FindNeighbors(MergedEos, reduction = "pca", dims = 1:10)
+MergedEos<- FindClusters(MergedEos, resolution = 0.5)
+DimPlot(MergedEos, reduction = "umap", label = TRUE, repel = TRUE)
+
+DimPlot(MergedEos, reduction = "umap", label = TRUE, repel = TRUE, group.by = "sample")
+
+DEGEos <- FindAllMarkers(MergedEos, test.use = "roc",min.pct = 0.1, logfc.threshold = 0.25)
+```
+
+
+
+```{r}
+  # Save to excel files
+  wbNeu <- createWorkbook()
+  addWorksheet(wbNeu, "DEGNeu Results")
+  writeData(wbNeu, sheet = "DEGNeu Results", x = DEGNeu)
+  saveWorkbook(wbNeu, file = "/Users/25advaym/genomics/DEGNeu.xlsx", overwrite = TRUE)
+  
+  wbEpi <- createWorkbook()
+  addWorksheet(wbEpi, "DEGEpi Results")
+  writeData(wbEpi, sheet = "DEGEpi Results", x = DEGEpi)
+  saveWorkbook(wbEpi, file = "/Users/25advaym/genomics/DEGEpi.xlsx", overwrite = TRUE)
+  
+  wbEos <- createWorkbook()
+  addWorksheet(wbEos, "DEGEos Results")
+  writeData(wbEos, sheet = "DEGEos Results", x = DEGEos)
+  saveWorkbook(wbEos, file = "/Users/25advaym/genomics/DEGEos.xlsx", overwrite = TRUE)
+```
+
+
+
+
+
+
+
+```{r}
+
+# Filter the results by AUC and cluster number
+Sig_DEGNeu <- DEGNeu %>% filter(((myAUC > 0.7 & cluster == 1) | (myAUC > 0.9 & cluster == 4)) & !grepl("^Rp", gene) & !grepl("^mt-", gene) & !grepl("^Hsp", gene))
+Sig_DEGNeu1 <- Sig_DEGNeu %>% filter(cluster == 1)
+Sig_DEGNeu2 <- Sig_DEGNeu %>% filter(cluster == 4)
+
+
+Sig_DEGEpi <- DEGEpi %>% filter(((myAUC > 0.7 & cluster == 1) | (myAUC > 0.93 & cluster == 2)) & !grepl("^Rp", gene) & !grepl("^mt-", gene) & !grepl("^Hsp", gene))
+Sig_DEGEpi1 <- Sig_DEGEpi %>% filter(cluster == 1)
+Sig_DEGEpi2 <- Sig_DEGEpi %>% filter(cluster == 2)
+
+Sig_DEGEos <- DEGEos %>% filter(myAUC > 0.7 & !grepl("^Rp", gene) & !grepl("^mt-", gene) & !grepl("^Hsp", gene))
+Sig_DEGEos1 <- Sig_DEGEos %>% filter(cluster == 1)
+Sig_DEGEos2 <- Sig_DEGEos %>% filter(cluster == 2)
+```
+
+
+
+```{r}
+# Gene Oncology Analysis
+
+perform_GO <- function(deg_data, title) {
+  
+  # Ensure there are genes to analyze
+  genes <- deg_data$gene
+  if (length(genes) == 0) {
+    stop("Gene list is empty. Please provide a valid list of genes.")
+  }
+  
+  # Convert gene symbols to ENTREZ IDs
+  entrez_ids <- mapIds(org.Mm.eg.db, keys = genes, column = "ENTREZID", keytype = "SYMBOL", multiVals = "first")
+  entrez_ids <- entrez_ids[!is.na(entrez_ids)]
+  
+  if (length(entrez_ids) == 0) {
+    stop("No valid Entrez IDs found. Please check your gene symbols.")
+  }
+  
+  # Perform GO enrichment analysis
+  go_results <- enrichGO(gene = entrez_ids, OrgDb = org.Mm.eg.db, keyType = "ENTREZID", ont = "BP", pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.1)
+  
+  # CHANGE THE PVALUE
+  
+  if (is.null(go_results) || nrow(as.data.frame(go_results)) == 0) {
+    print(paste("No significant GO terms found for", title))
+    return(NULL)
+  }
+  
+  # Plot the results
+  print(dotplot(go_results, showCategory = 20) + ggtitle(paste("GO Enrichment Dot Plot -", title)))
+  print(barplot(go_results, showCategory = 20) + ggtitle(paste("GO Enrichment Bar Plot -", title)))
+  print(emapplot(pairwise_termsim(go_results)) + ggtitle(paste("Enrichment Map -", title)))
+}
+
+perform_GO(Sig_DEGNeu1, "Neutrophils Cluster 1")
+perform_GO(Sig_DEGNeu2, "Neutrophils Cluster 4")
+perform_GO(Sig_DEGEpi1, "Epithelial Cells Cluster 1")
+perform_GO(Sig_DEGEpi1, "Epithelial Cells Cluster 2")
+perform_GO(Sig_DEGEos1, "Eosinophils Cluster 1")
+perform_GO(Sig_DEGEos2, "Eosinophils Cluster 2")
+
+```
+
+
+
+```{r}
+# HEATMAPS
+
+# Extract the scaled data for the gene sets
+exp_mat_neu <- GetAssayData(MergedNeu, assay = "RNA", slot = "scale.data")
+exp_mat_epi <- GetAssayData(MergedEpi, assay = "RNA", slot = "scale.data")
+exp_mat_eos <- GetAssayData(MergedEos, assay = "RNA", slot = "scale.data")
+
+
+# Convert the data to a matrix
+exp_mat_neu <- as.matrix(exp_mat_neu)
+exp_mat_epi <- as.matrix(exp_mat_neu)
+exp_mat_eos <- as.matrix(exp_mat_eos)
+
+# Extract cell metadata
+meta_neu <- MergedNeu@meta.data %>%
+  dplyr::select(seurat_clusters)
+
+meta_epi <- MergedEpi@meta.data %>%
+  dplyr::select(seurat_clusters)
+
+meta_eos <- MergedEos@meta.data %>%
+  dplyr::select(seurat_clusters)
+
+# Ensure the row names match
+rownames(meta_neu) <- Cells(MergedNeu)
+rownames(meta_epi) <- Cells(MergedEpi)
+rownames(meta_eos) <- Cells(MergedEos)
+
+# function to create heatmap
+create_heatmap <- function(obj, genes, group) {
+  
+  # Extract the scaled data for the gene sets and convert to matrix
+  exp_mat <- GetAssayData(obj, assay = "RNA", slot = "scale.data")
+  exp_mat <- as.matrix(exp_mat)
+  
+  # Extract cell metadata
+  meta <- obj@meta.data %>%
+  dplyr::select(group)
+  
+  # Ensure the row names match
+  rownames(meta) <- Cells(obj)
+  
+  absent_genes <- genes[!genes %in% rownames(exp_mat)]
+  
+  if (length(absent_genes) > 0) {
+    print(paste("Absent genes:", paste(absent_genes, collapse = ", ")))
+  }
+  # Merge expression data with metadata
+  meta_exp <- bind_cols(meta, as.data.frame(t(exp_mat[genes, ])))
+  
+  # Convert the data to long format
+  meta_long <- pivot_longer(meta_exp, cols = genes, names_to = "Gene", values_to = "Expression")
+  
+  # Summarize the data
+  meta_summary <- meta_long %>%
+    group_by(across(all_of(group)), Gene) %>%
+    summarise(Avg = mean(Expression, na.rm = TRUE),
+              Pct = sum(Expression > 0) / length(Expression) * 100)
+  
+  # Ensure the gene list order is maintained
+  meta_summary$Gene <- factor(meta_summary$Gene, levels = genes)
+  
+  # Plot the heatmap
+  #Colors to use:
+  #scale_fill_gradientn(colors = viridis(n = 4, option = "viridis"))
+  #scale_fill_gradientn(colors = viridis(n = 4, option = "plasma"))
+  #scale_fill_gradient(low="lavender", high="navy")
+  heatmap <- ggplot(meta_summary, aes(x = Gene, y = !!sym(group), fill = Avg)) +
+    geom_tile(color = "black") +
+    scale_fill_gradientn(colors = viridis(n = 4, option = "plasma")) +
+    theme(axis.text.x = element_text(size = 24, angle = 45, hjust = 1, color = "black"),
+          axis.text.y = element_text(size = 25, color = "black"),
+          axis.title = element_text(size = 30))
+  
+  return(heatmap)
+}
+
+
+
+```
+
+
+
+
+
+
+```{r}
+# METABOLISM HEATMAPS
+
+
+# Change metadata to include sample information
+MergedNeu$sample <- MergedNeu$orig.ident
+MergedEpi$sample <- MergedEpi$orig.ident
+MergedEos$sample <- MergedEos$orig.ident
+
+
+# Set sample as the identity
+Idents(MergedNeu) <- "sample"
+head(Idents(MergedNeu))
+
+Idents(MergedEpi) <- "sample"
+head(Idents(MergedEpi))
+
+Idents(MergedEos) <- "sample"
+head(Idents(MergedEos))
+
+# Define gene sets
+GM_genes <- c("Hk1", "Hk2", "Pfkm", "Pfkp", "Pfkl", "Tpi1", "Pgam1", "Eno1", "Pkm", "Cs", "Aco2", "Idh2", "Sucla2", "Sdha", "Mdh1")
+LM_genes <- c("Cpt1a", "Acadvl", "Hadha", "Hadhb", "Hadh", "Acadm", "Echs1", "Acaa2", "Fabp1", "Fabp2", "Fabp4", "Scd1")
+AM_genes <- c("Pla2g2a", "Plcb1", "Plcb2", "Plcg1", "Pld1", "Alox5", "Alox12", "Alox12b", "Alox15", "Aloxe3", "Ptgs1", "Lta4h")
+MM_genes <- c("Ndufs1", "Ndufs2", "Ndufs3", "Ndufs4", "Ndufs5", "Ndufs6", "Ndufs7", "Ndufs8", "Sdha", "Sdhb", "Sdhc", "Sdhd", "Uqcrc1", "Uqcrc2", "Uqcrfs1", "mt-Co1", "mt-Co2", "mt-Co3", "Cox4i1", "Cox5a", "Cox5b", "Atp5a1", "Atp5b", "Atp5c1", "Atp5d", "Atp5e", "Cs", "Aco2", "Idh2", "Ogdh", "Suclg1", "Suclg2", "Mdh2", "Vdac1", "Vdac2", "Vdac3", "Slc25a4", "Slc25a5", "Cycs", "Polg", "Sod2")
+
+# Generate and print heatmaps for each gene set
+GMNeu_heatmap <- create_heatmap(MergedNeu, GM_genes, "sample") + ggtitle("Heatmap of Glucose Metabolism Gene Expression in Neutrophils across Different Samples") + theme(plot.title = element_text(size = 25))
+print(GMNeu_heatmap)
+
+LMNeu_heatmap <- create_heatmap(MergedNeu, LM_genes, "sample") +  ggtitle("Heatmap of Lipid Metabolism Gene Expression in Neutrophils across Different Samples") + theme(plot.title = element_text(size = 25))
+print(LM_heatmap)
+
+AMNeu_heatmap <- create_heatmap(MergedNeu, AM_genes, "sample") +  ggtitle("Heatmap of Arachidonic Acid Metabolism Gene Expression in Neutrophils across Different Samples") + theme(plot.title = element_text(size = 25))
+print(AM_heatmap)
+
+MMNeu_heatmap <- create_heatmap(MergedNeu, MM_genes, "sample") +  ggtitle("Heatmap of Mitochondrial Metabolism Gene Expression in Neutrophils across Different Samples") + theme(plot.title = element_text(size = 25))
+print(MM_heatmap)
+
+GMEpi_heatmap <- create_heatmap(MergedEpi, GM_genes, "sample") + ggtitle("Heatmap of Glucose Metabolism Gene Expression in Epithelial Cells across Different Samples") + theme(plot.title = element_text(size = 25))
+print(GMEpi_heatmap)
+
+LMEpi_heatmap <- create_heatmap(MergedEpi, LM_genes, "sample") +  ggtitle("Heatmap of Lipid Metabolism Gene Expression in Epithelial Cells across Different Samples") + theme(plot.title = element_text(size = 25))
+print(LMEpi_heatmap)
+
+AMEpi_heatmap <- create_heatmap(MergedEpi, AM_genes, "sample") +  ggtitle("Heatmap of Arachidonic Acid Metabolism Gene Expression in Epithelial Cells across Different Samples") + theme(plot.title = element_text(size = 25))
+print(AMEpi_heatmap)
+
+MMEpi_heatmap <- create_heatmap(MergedEpi, MM_genes, "sample") +  ggtitle("Heatmap of Mitochondrial Metabolism Gene Expression in Epithelial Cells across Different Samples") + theme(plot.title = element_text(size = 25))
+print(MMEpi_heatmap)
+
+GMEos_heatmap <- create_heatmap(MergedEos, GM_genes, "sample") + ggtitle("Heatmap of Glucose Metabolism Gene Expression in Eosinophils across Different Samples") + theme(plot.title = element_text(size = 25))
+print(GMEos_heatmap)
+
+```
+
+
+
+
+```{r}
+
+# Filter to keep only desired samples
+desired_samples <- c("Ctrl1", "Ctrl2", "Obese1", "Obese2")
+MergedNeu <- subset(MergedNeu, subset = sample %in% desired_samples)
+
+# Check for NA values in the sample metadata and remove them
+na_samples <- which(is.na(MergedNeu$sample))
+if (length(na_samples) > 0) {
+    print(paste("Found NA values in sample metadata at positions:", paste(na_samples, collapse = ", ")))
+    MergedNeu <- subset(MergedNeu, cells = setdiff(Cells(MergedNeu), Cells(MergedNeu)[na_samples]))
+}
+
+# Calculate average expression for the gene lists
+average_expression <- AverageExpression(MergedNeu, features = c(GM_genes, LM_genes, AM_genes, MM_genes), group.by = "sample", return.seurat = TRUE)
+
+# Generate Heatmaps
+GM_heatmap <- DoHeatmap(average_expression, features = GM_genes, group.by = "sample",group.colors = (BlackAndWhite()) ,slot = "scale.data",
+  assay = "RNA", raster = FALSE, draw.lines = FALSE, lines.width = 0) + ggtitle("Glycolysis Heatmap") + scale_fill_gradient(low="lightpink", high="navy")
+print(GM_heatmap)
+
+LM_heatmap <- DoHeatmap(average_expression, features = LM_genes, group.by = "sample",group.colors = (BlackAndWhite()) ,slot = "scale.data",
+  assay = "RNA", raster = FALSE, draw.lines = FALSE, lines.width = 0) + ggtitle("Lipid Metabolism Heatmap") + scale_fill_gradient(low="lightblue", high="navy") + theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 90, hjust = 1))
+print(LM_heatmap)
+
+AM_heatmap <- DoHeatmap(average_expression, features = AM_genes, group.by = "sample",group.colors = (BlackAndWhite()) ,slot = "scale.data",
+  assay = "RNA", raster = FALSE, draw.lines = FALSE, lines.width = 0) + ggtitle("Arachidonic Acid Metabolism Heatmap") + scale_fill_gradient(low="lightgreen", high="darkgreen") + theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 90, hjust = 1))
+print(AM_heatmap)
+
+MM_heatmap <- DoHeatmap(average_expression, features = MM_genes, group.by = "sample",group.colors = (BlackAndWhite()) ,slot = "scale.data",
+  assay = "RNA", raster = FALSE, draw.lines = FALSE, lines.width = 0) + ggtitle("Mitochondrial Metabolism Heatmap") + scale_fill_gradient(low="lightyellow", high="lightpink") + theme(panel.spacing = unit(0, "lines"), axis.text.x = element_text(angle = 90, hjust = 1))
+print(MM_heatmap)
+
+```
+
+
+
+```{r}
+# DIFFERENTIAL EXPRESSION BY SAMPLE 
+
+
+DimPlot(MergedNeu, reduction = "umap", label = TRUE, repel = TRUE, group.by = "sample")
+
+# Set the sample as the identity class
+MergedNeu$sample <- MergedNeu$orig.ident
+Idents(MergedNeu) <- "sample"
+
+DEGNeuSample <- FindAllMarkers(MergedNeu, test.use = "roc")
+
+DEGNeu_Ctrl1 <- DEGNeuSample %>% filter(cluster == "Ctrl1") 
+DEGNeu_Ctrl2 <- DEGNeuSample %>% filter(cluster == "Ctrl2") 
+DEGNeu_Obese1 <- DEGNeuSample %>% filter(cluster == "Obese1") 
+DEGNeu_Obese2 <- DEGNeuSample %>% filter(cluster == "Obese2") # & myAUC > 0.7 & !grepl("^Rp", gene) & !grepl("^mt-", gene) & !grepl("^Hsp", gene))
+
+perform_GO(DEGNeu_Ctrl1, "Neutrophils Ctrl1")
+perform_GO(DEGNeu_Ctrl2, "Neutrophils Ctrl2")
+perform_GO(DEGNeu_Obese1, "Neutrophils Obese1")
+perform_GO(DEGNeu_Obese2, "Neutrophils Obese2")
+
+
+
+```
+
+
+
+```{r}
+# save for later
+# Save each Seurat object to a separate file
+
+# List of Seurat objects to save
+seurat_objects <- list(Ctrl1, Ctrl1_Neu, Ctrl1_Epi, Ctrl1.data,
+                       Ctrl2, Ctrl2_Neu, Ctrl2_Epi, Ctrl2.data,
+                       Obese1, Obese1_Neu, Obese1_Epi, Obese1_Eos, Obese1.data,
+                       Obese2, Obese2_Neu, Obese2_Epi, Obese2_Eos, Obese2.data,
+                       MergedEpi, MergedNeu, MergedEos, average_expression)
+
+# List of object names
+object_names <- c("Ctrl1", "Ctrl1_Neu", "Ctrl1_Epi", "Ctrl1.data", "Ctrl2", "Ctrl2_Neu", "Ctrl2_Epi", "Ctrl2.data", "Obese1", "Obese1_Neu", "Obese1_Epi", "Obese1_Eos", "Obese1.data", "Obese2", "Obese2_Neu", "Obese2_Epi", "Obese2_Eos", "Obese2.data", "MergedEpi", "MergedNeu", "MergedEos", "average_expression")
+
+# Save each Seurat object
+for (i in seq_along(seurat_objects)) {
+  saveRDS(seurat_objects[[i]], file = paste0("/Users/25advaym/genomics/GLPvsSAL/Objects/", object_names[i], ".rds"))
+}
+
+# List of tables to save
+tables <- list(DEGEpi, DEGNeu, DEGNeu_Ctrl1, DEGNeu_Ctrl2, DEGNeu_Obese1, DEGNeu_Obese2, DEGEos, DEGNeuSample,
+               Sig_DEGEpi1, Sig_DEGEpi2, Sig_DEGEos1, Sig_DEGEos2, Sig_DEGNeu1, Sig_DEGNeu2, 
+               meta_neu, meta_epi, meta_eos, exp_mat_epi, exp_mat_neu, exp_mat_eos)
+
+# List of table names
+table_names <- c("DEGEpi", "DEGNeu", "DEGNeu_Ctrl1", "DEGNeu_Ctrl2", "DEGNeu_Obese1", "DEGNeu_Obese2", "DEGEos", "DEGNeuSample",
+                 "Sig_DEGEpi1", "Sig_DEGEpi2", "Sig_DEGEos1", "Sig_DEGEos2", "Sig_DEGNeu1", "Sig_DEGNeu2",
+                 "meta_neu", "meta_epi", "meta_eos", "exp_mat_epi", "exp_mat_neu", "exp_mat_eos")
+
+# Save each table
+for (i in seq_along(tables)) {
+  write.csv(tables[[i]], file = paste0("/Users/25advaym/genomics/GLPvsSAL/Tables/", table_names[i], ".csv"), row.names = FALSE)
+}
+
+
+```
+
